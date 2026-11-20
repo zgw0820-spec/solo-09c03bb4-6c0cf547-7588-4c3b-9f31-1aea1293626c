@@ -1,4 +1,4 @@
-"""备份专网出口切换 · 换表轮次规划器 Web 服务。"""
+"""备份专网故障定位与换表轮次规划 Web 服务。"""
 from __future__ import annotations
 
 import json
@@ -6,14 +6,14 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 
+from .diagnose import diagnose_payload
 from .planner import InputError, build_model, compute_plan
 
 BASE_DIR = Path(__file__).resolve().parent
 EXAMPLES_DIR = BASE_DIR.parent / "examples"
 
-app = FastAPI(title="换表轮次规划器", version="1.0.0")
+app = FastAPI(title="备份专网故障定位与换表轮次规划", version="1.1.0")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -31,6 +31,7 @@ async def example() -> JSONResponse:
         "topology": load("topology.json"),
         "routes": load("routes.json"),
         "requirements": load("requirements.json"),
+        "diagnose": load("diagnose.json"),
     })
 
 
@@ -53,3 +54,22 @@ async def plan(request: Request) -> JSONResponse:
     except InputError as exc:
         return JSONResponse({"detail": str(exc)}, status_code=400)
     return JSONResponse(result.as_dict())
+
+
+@app.post("/api/diagnose")
+async def diagnose(request: Request) -> JSONResponse:
+    """按实测记录筛选故障场景,给出分组、最少补测项与预期结果。"""
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        return JSONResponse({"detail": "请求体必须是 JSON"}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"detail": "请求体必须是 JSON 对象"}, status_code=400)
+    try:
+        result = diagnose_payload(
+            body.get("topology"), body.get("routes"), body.get("switched"),
+            body.get("measurements"), body.get("candidates"),
+        )
+    except InputError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=400)
+    return JSONResponse(result)

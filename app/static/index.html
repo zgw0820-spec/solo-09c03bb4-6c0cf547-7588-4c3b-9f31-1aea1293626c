@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>备份专网出口切换 · 换表轮次规划器</title>
+<title>备份专网故障定位 · 换表轮次规划与补测</title>
 <style>
   :root { --bd:#c9d1d9; --ok:#1a7f37; --bad:#cf222e; --warn:#9a6700; --bg:#f6f8fa; }
   * { box-sizing: border-box; }
@@ -14,15 +14,17 @@
   main { max-width:1180px; margin:0 auto; padding:16px 24px 48px; }
   section { background:#fff; border:1px solid var(--bd); border-radius:8px; padding:16px; margin-bottom:16px; }
   h2 { font-size:15px; margin:0 0 12px; }
+  h3 { font-size:14px; margin:16px 0 8px; }
   .cols { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
   @media (max-width:900px){ .cols{grid-template-columns:1fr;} }
   label.f { display:block; font-size:13px; font-weight:600; margin-bottom:4px; }
-  textarea { width:100%; height:220px; font-family:ui-monospace,Consolas,monospace; font-size:12px;
+  textarea { width:100%; height:200px; font-family:ui-monospace,Consolas,monospace; font-size:12px;
              border:1px solid var(--bd); border-radius:6px; padding:8px; resize:vertical; }
   input[type=file]{ font-size:12px; margin-top:4px; }
   button { background:#1f6feb; color:#fff; border:0; border-radius:6px; padding:8px 18px;
            font-size:14px; cursor:pointer; }
   button.ghost { background:#fff; color:#1f6feb; border:1px solid #1f6feb; }
+  button.small { padding:4px 10px; font-size:12px; }
   button:hover { filter:brightness(1.08); }
   .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
   .checks label { display:inline-block; margin:4px 14px 4px 0; font-size:14px; }
@@ -31,22 +33,36 @@
          padding:10px 12px; font-size:13px; white-space:pre-wrap; }
   .okbox { background:#dafbe1; border:1px solid #4ac26b66; border-radius:6px; padding:10px 12px; }
   .badbox { background:#ffebe9; border:1px solid #ff818266; border-radius:6px; padding:10px 12px; }
+  .warnbox { background:#fff8c5; border:1px solid #d4a72c66; border-radius:6px; padding:10px 12px; }
   table { border-collapse:collapse; width:100%; font-size:13px; margin-top:8px; }
-  th,td { border:1px solid var(--bd); padding:6px 10px; text-align:left; }
+  th,td { border:1px solid var(--bd); padding:6px 10px; text-align:left; vertical-align:top; }
   th { background:var(--bg); }
   .tag { display:inline-block; border-radius:10px; padding:1px 10px; font-size:12px; color:#fff; }
   .tag.ok { background:var(--ok);} .tag.loop{ background:var(--bad);} .tag.blackhole{ background:var(--warn);}
-  .tag.wrong_egress{ background:#8250df;}
+  .tag.wrong_egress{ background:#8250df;} .tag.group{ background:#1f6feb;}
   .mono { font-family:ui-monospace,Consolas,monospace; }
   .round { font-size:14px; margin:6px 0; }
   .round b { color:#1f6feb; }
   .failcard { border:1px solid var(--bd); border-radius:6px; padding:10px 12px; margin-top:10px; }
+  .item { border:1px solid var(--bd); border-radius:6px; padding:10px 12px; margin-top:10px; }
+  .list { border:1px solid var(--bd); border-radius:6px; padding:8px 10px; }
+  .list > .line { display:flex; gap:8px; align-items:center; margin:4px 0; flex-wrap:wrap;
+                  border-bottom:1px dashed #eee; padding-bottom:6px; }
+  .list > .line:last-child { border-bottom:0; }
+  .list input[type=text], .list select { border:1px solid var(--bd); border-radius:5px; padding:4px 8px;
+             font-size:13px; font-family:ui-monospace,Consolas,monospace; }
+  .list input[type=text] { flex:1; min-width:120px; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media (max-width:900px){ .grid2{grid-template-columns:1fr;} }
+  .pill { background:var(--bg); border:1px solid var(--bd); border-radius:10px; padding:1px 9px;
+          font-size:12px; display:inline-block; margin:2px 4px 2px 0; }
+  .probe { background:#ddf4ff; border:1px solid #54aeff66; border-radius:6px; padding:8px 10px; margin:6px 0; }
 </style>
 </head>
 <body>
 <header>
-  <h1>备份专网出口切换 · 换表轮次规划器</h1>
-  <p>上传拓扑与换版前后静态路由表(≤8 台),给出轮次最少的整表切换计划;同轮任意完成顺序均保证保通要求。</p>
+  <h1>备份专网故障定位 · 换表轮次规划与补测</h1>
+  <p>沿用已填的拓扑与路由表,按已换设备勾选项确定当前用表;录入实测记录,推演无故障及每条链路/每个出口单独失效,给出故障分组与最少补测项。</p>
 </header>
 <main>
   <section>
@@ -63,7 +79,7 @@
         <input type="file" accept=".json" data-target="routes">
       </div>
       <div>
-        <label class="f">保通要求(入口 / 目标 CIDR / 允许出口)</label>
+        <label class="f">保通要求(仅换表计划用)</label>
         <textarea id="requirements" spellcheck="false"></textarea>
         <input type="file" accept=".json" data-target="requirements">
       </div>
@@ -75,23 +91,55 @@
   </section>
 
   <section>
-    <h2>2. 已换设备(现场只换完一部分时勾选,再点生成即中途续排)</h2>
+    <h2>2. 已换设备(当前用表:勾选=换版后,未勾选=换版前)</h2>
     <div class="checks" id="switchedChecks"><span class="hint">解析路由表后显示设备清单</span></div>
-    <div class="row" style="margin-top:10px">
-      <button id="run">生成计划 / 按勾选续排</button>
-      <span class="hint">目标网段按所有表项切分为等价区间,逐类验证"网段内任一地址"。</span>
+  </section>
+
+  <section>
+    <h2>3. 故障定位 · 实测记录(同一时段)</h2>
+    <p class="hint">每条填写入口路由器、目标 IPv4 和结果;结果为“出口”时须填写出口名,“断路”“环路”不必填出口。</p>
+    <div class="list" id="measureList"></div>
+    <div class="row" style="margin-top:8px">
+      <button class="ghost small" id="addMeas">+ 添加实测记录</button>
+      <span class="hint" id="measCount"></span>
+    </div>
+
+    <h3>可补测的入口与目标(最多 12 条)</h3>
+    <div class="list" id="candList"></div>
+    <div class="row" style="margin-top:8px">
+      <button class="ghost small" id="addCand">+ 添加补测项</button>
+      <span class="hint" id="candCount"></span>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button id="runDiagnose">推演故障场景 / 求最少补测</button>
+      <span class="hint">推演无故障、每条链路单独失效、每个出口单独失效;撤下受影响的路由表项后按最长前缀继续逐跳转发。</span>
+    </div>
+  </section>
+
+  <section id="diagSec" style="display:none">
+    <h2>4. 故障定位结果</h2>
+    <div id="diagResult"></div>
+  </section>
+
+  <section>
+    <h2>5. 换表轮次计划(可选)</h2>
+    <div class="row">
+      <button id="run">生成换表计划 / 按勾选续排</button>
+      <span class="hint">目标网段按所有表项切分为等价区间,逐类验证“网段内任一地址”。</span>
     </div>
   </section>
 
   <section id="resultSec" style="display:none">
-    <h2>3. 结果</h2>
+    <h2>6. 换表计划结果</h2>
     <div id="result"></div>
   </section>
 </main>
 
 <script>
 const $ = id => document.getElementById(id);
+const MAX_CANDIDATES = 12;
 
+/* ---------------------------------------------------------------- 输入区 */
 document.querySelectorAll('input[type=file]').forEach(inp => {
   inp.addEventListener('change', () => {
     const f = inp.files[0];
@@ -109,22 +157,136 @@ $('loadExample').addEventListener('click', async () => {
   $('routes').value = JSON.stringify(d.routes, null, 2);
   $('requirements').value = JSON.stringify(d.requirements, null, 2);
   refreshChecks();
+  loadDiagnoseExample(d.diagnose);
 });
 
+function routerNames() {
+  try { return Object.keys(JSON.parse($('routes').value)).sort(); } catch (e) { return []; }
+}
+
+function egressNames() {
+  try { return (JSON.parse($('topology').value).egresses || []).map(e => e.name); } catch (e) { return []; }
+}
+
 function refreshChecks() {
-  let names = [];
-  try { names = Object.keys(JSON.parse($('routes').value)).sort(); } catch (e) {}
+  const names = routerNames();
   const box = $('switchedChecks');
   if (!names.length) { box.innerHTML = '<span class="hint">解析路由表后显示设备清单</span>'; return; }
   const prev = new Set([...box.querySelectorAll('input:checked')].map(x => x.value));
   box.innerHTML = names.map(n =>
-    `<label><input type="checkbox" value="${n}" ${prev.has(n) ? 'checked' : ''}> ${n}(已换)</label>`
+    `<label><input type="checkbox" value="${esc(n)}" ${prev.has(n) ? 'checked' : ''}> ${esc(n)}(已换)</label>`
   ).join('');
+  refreshSelects();
 }
 ['topology','routes','requirements'].forEach(id => $(id).addEventListener('input', refreshChecks));
 
 function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
+/* ------------------------------------------------------------ 实测记录 */
+function optionList(values, current) {
+  return values.map(v => `<option value="${esc(v)}" ${v === current ? 'selected' : ''}>${esc(v)}</option>`).join('');
+}
+
+function measRow(m) {
+  const routers = routerNames(), egresses = egressNames();
+  const div = document.createElement('div');
+  div.className = 'line meas-row';
+  div.innerHTML = `
+    <span>入口</span>
+    <select class="m-ingress">${optionList(routers, m.ingress)}</select>
+    <span>目标</span>
+    <input type="text" class="m-target" placeholder="10.1.0.5" value="${esc(m.target || '')}">
+    <span>结果</span>
+    <select class="m-result">
+      <option value="ok" ${m.result === 'ok' ? 'selected' : ''}>出口</option>
+      <option value="blackhole" ${m.result === 'blackhole' ? 'selected' : ''}>断路</option>
+      <option value="loop" ${m.result === 'loop' ? 'selected' : ''}>环路</option>
+    </select>
+    <select class="m-egress">${optionList(egresses, m.egress)}</select>
+    <button class="ghost small m-del">删除</button>`;
+  div.querySelector('.m-del').addEventListener('click', () => { div.remove(); updateCounts(); });
+  const sync = () => {
+    const ok = div.querySelector('.m-result').value === 'ok';
+    div.querySelector('.m-egress').style.display = ok ? '' : 'none';
+  };
+  div.querySelector('.m-result').addEventListener('change', sync);
+  sync();
+  return div;
+}
+
+function addMeasRow(m) { $('measureList').appendChild(measRow(m || {})); updateCounts(); }
+
+function candRow(c) {
+  const routers = routerNames();
+  const div = document.createElement('div');
+  div.className = 'line cand-row';
+  div.innerHTML = `
+    <span>入口</span>
+    <select class="c-ingress">${optionList(routers, c.ingress)}</select>
+    <span>目标</span>
+    <input type="text" class="c-target" placeholder="10.1.0.5" value="${esc(c.target || '')}">
+    <button class="ghost small c-del">删除</button>`;
+  div.querySelector('.c-del').addEventListener('click', () => { div.remove(); updateCounts(); });
+  return div;
+}
+
+function addCandRow(c) {
+  if ($('candList').querySelectorAll('.cand-row').length >= MAX_CANDIDATES) { updateCounts(); return; }
+  $('candList').appendChild(candRow(c || {}));
+  updateCounts();
+}
+
+function refreshSelects() {
+  const routers = routerNames(), egresses = egressNames();
+  $('measureList').querySelectorAll('.meas-row').forEach(row => {
+    const ing = row.querySelector('.m-ingress'), prevIng = ing.value;
+    ing.innerHTML = optionList(routers, prevIng);
+    const eg = row.querySelector('.m-egress'), prevEg = eg.value;
+    eg.innerHTML = optionList(egresses, prevEg);
+  });
+  $('candList').querySelectorAll('.cand-row').forEach(row => {
+    const ing = row.querySelector('.c-ingress'), prev = ing.value;
+    ing.innerHTML = optionList(routers, prev);
+  });
+}
+
+function updateCounts() {
+  const m = $('measureList').querySelectorAll('.meas-row').length;
+  const c = $('candList').querySelectorAll('.cand-row').length;
+  $('measCount').textContent = `已填 ${m} 条`;
+  $('candCount').textContent = `已填 ${c} / ${MAX_CANDIDATES} 条`;
+}
+
+function loadDiagnoseExample(d) {
+  $('measureList').innerHTML = '';
+  $('candList').innerHTML = '';
+  (d.measurements || []).forEach(addMeasRow);
+  (d.candidates || []).forEach(addCandRow);
+  if (!($('measureList').children.length)) addMeasRow({});
+  if (!($('candList').children.length)) addCandRow({});
+}
+
+$('addMeas').addEventListener('click', () => addMeasRow({}));
+$('addCand').addEventListener('click', () => addCandRow({}));
+
+function collectDiagnose() {
+  const measurements = [...$('measureList').querySelectorAll('.meas-row')].map(row => {
+    const d = {
+      ingress: row.querySelector('.m-ingress').value,
+      target: row.querySelector('.m-target').value.trim(),
+      result: row.querySelector('.m-result').value,
+    };
+    if (d.result === 'ok') d.egress = row.querySelector('.m-egress').value;
+    return d;
+  }).filter(m => m.target !== '');
+  const candidates = [...$('candList').querySelectorAll('.cand-row')].map(row => ({
+    ingress: row.querySelector('.c-ingress').value,
+    target: row.querySelector('.c-target').value.trim(),
+  })).filter(c => c.target !== '');
+  return { measurements, candidates };
+}
+
+/* ------------------------------------------------------------ 结果渲染 */
 function pathTable(path, verdict) {
   const rows = path.map((h, i) => {
     let to = '—';
@@ -141,6 +303,84 @@ function pathTable(path, verdict) {
   return `<table><tr><th>跳</th><th>路由器</th><th>匹配前缀</th><th>下一跳</th><th>发往</th></tr>${rows}</table>`;
 }
 
+function resultText(r) {
+  if (r.verdict === 'ok') return `<span class="tag ok">出口 ${esc(r.egress)}</span>`;
+  if (r.verdict === 'loop') return '<span class="tag loop">环路</span>';
+  return '<span class="tag blackhole">断路</span>';
+}
+
+function renderDiagnose(d) {
+  if (d.status === 'no_scenario') {
+    return `<div class="badbox"><b>没有场景符合</b> — ${esc(d.message)}</div>
+      <p class="hint">已推演 ${d.scenarios_total} 个场景(无故障、每条链路、每个出口单独失效),无一与全部实测记录相符。</p>`;
+  }
+  if (!d.groups.length) {
+    return `<div class="warnbox"><b>尚未填写可补测项</b> — ${esc(d.message)}</div>
+      <p class="hint">已推演 ${d.scenarios_total} 个场景,${d.scenarios_matched.length} 个与实测相符。</p>`;
+  }
+
+  const matched = d.scenarios_matched.map(s => `<span class="pill">${esc(s.label)}</span>`).join('');
+  const groups = d.groups.map(g => `
+    <div class="item">
+      <div><span class="tag group">组 ${g.id}</span>
+        ${g.labels.map(esc).join('、')}
+        ${g.labels.length > 1 ? '<span class="hint">(在这些补测项上结果完全相同)</span>' : ''}</div>
+      <div class="hint" style="margin-top:4px">可能出口:${g.possible_egresses.length ? g.possible_egresses.map(esc).join('、') : '(无)'}</div>
+    </div>`).join('');
+
+  const probes = d.min_probes.length
+    ? d.min_probes.map((p, i) => `<div class="probe"><b>补测 ${i + 1}</b>:入口 <span class="mono">${esc(p.ingress)}</span>
+        · 目标 <span class="mono">${esc(p.target)}</span></div>`).join('')
+    : `<p class="hint">${esc(d.message)}</p>`;
+
+  const expected = d.expected.map(e => `
+    <tr><td><span class="tag group">组 ${e.group}</span></td>
+      <td>${e.labels.map(esc).join('、')}</td>
+      <td>${e.results.map(r =>
+        `${esc(r.candidate)}:<br>${resultText(r)}`).join('<hr style="border:0;border-top:1px solid #eee;margin:6px 0">')}</td></tr>`).join('');
+
+  const indeterminate = d.indistinguishable.length
+    ? `<div class="warnbox" style="margin-top:12px"><b>无法再细分</b> — 以下组内含多个场景,在全部候选补测项上结果都一样:
+        ${d.indistinguishable.map(g => `组 ${g.group}(${g.labels.map(esc).join('、')})`).join(';')}
+        <div class="hint">要区分需更换入口或目标地址再补测。</div></div>`
+    : '';
+
+  return `<div class="okbox"><b>推演完成</b> — ${esc(d.message)}
+      <div>已换设备:${d.switched.length ? d.switched.map(esc).join('、') : '(无)'}</div>
+      <div>${d.scenarios_total} 个场景中 ${d.scenarios_matched.length} 个与实测相符</div></div>
+    <h3>与实测相符的场景</h3><div>${matched}</div>
+    <h3>故障分组(${d.groups.length} 组)</h3>${groups}
+    <h3>区分所有组的最少补测项(${d.min_probes.length} 条)</h3>${probes}
+    ${d.expected.length ? `<h3>各组的预期补测结果</h3>
+      <table><tr><th>组</th><th>场景</th><th>预期结果</th></tr>${expected}</table>` : ''}
+    ${indeterminate}`;
+}
+
+$('runDiagnose').addEventListener('click', async () => {
+  const out = $('diagResult'), sec = $('diagSec');
+  sec.style.display = 'block';
+  let body;
+  try {
+    body = {
+      topology: JSON.parse($('topology').value),
+      routes: JSON.parse($('routes').value),
+      switched: [...$('switchedChecks').querySelectorAll('input:checked')].map(x => x.value),
+      ...collectDiagnose(),
+    };
+  } catch (e) {
+    out.innerHTML = `<div class="err">JSON 解析失败:${esc(e.message)}</div>`;
+    return;
+  }
+  out.innerHTML = '<p class="hint">推演中……</p>';
+  const resp = await fetch('/api/diagnose', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+  });
+  const d = await resp.json();
+  if (!resp.ok) { out.innerHTML = `<div class="err">输入校验失败:${esc(d.detail ?? resp.status)}</div>`; return; }
+  out.innerHTML = renderDiagnose(d);
+});
+
+/* ------------------------------------------------------------ 换表计划 */
 $('run').addEventListener('click', async () => {
   const out = $('result'), sec = $('resultSec');
   sec.style.display = 'block';
@@ -187,6 +427,8 @@ $('run').addEventListener('click', async () => {
 });
 
 refreshChecks();
+addMeasRow({});
+addCandRow({});
 </script>
 </body>
 </html>

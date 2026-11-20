@@ -1,0 +1,12 @@
+{
+  "measurements": [
+    {"ingress": "R1", "target": "10.1.0.5", "result": "blackhole"}
+  ],
+  "candidates": [
+    {"ingress": "R1", "target": "10.1.0.5"},
+    {"ingress": "R2", "target": "10.1.0.5"},
+    {"ingress": "R3", "target": "10.1.0.5"},
+    {"ingress": "R4", "target": "10.1.0.5"},
+    {"ingress": "R5", "target": "10.1.0.5"}
+  ]
+}

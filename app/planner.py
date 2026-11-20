@@ -114,14 +114,16 @@ def _parse_routes(items, what: str) -> list[Route]:
     return routes
 
 
-def build_model(topology: dict, routes: dict, requirements: dict) -> Model:
-    """把上传的三个 JSON 对象校验并组装成模型。"""
+def build_network(topology: dict, routes: dict) -> Model:
+    """校验拓扑与路由表并组装网络模型(不含保通要求)。
+
+    故障定位只需要拓扑和路由表,因此把这一半单独暴露出来,避免为了
+    构造模型而伪造一条保通要求。
+    """
     if not isinstance(topology, dict):
         raise InputError("拓扑必须是 JSON 对象")
     if not isinstance(routes, dict):
         raise InputError("路由表必须是 JSON 对象")
-    if not isinstance(requirements, dict):
-        raise InputError("保通要求必须是 JSON 对象")
 
     # ---- 链路
     links = []
@@ -174,7 +176,30 @@ def build_model(topology: dict, routes: dict, requirements: dict) -> Model:
         if eg.router not in rset:
             raise InputError(f"出口 {eg.name} 挂在没有路由表的路由器上: {eg.router}")
 
+    # ---- 每台路由器的下一跳解析表(链路对端 + 本机出口),最长前缀优先
+    resolve: dict[str, list[tuple[ipaddress.IPv4Network, tuple[str, str]]]] = {r: [] for r in routers}
+    for lk in links:
+        resolve[lk.a].append((lk.network, ("router", lk.b)))
+        resolve[lk.b].append((lk.network, ("router", lk.a)))
+    for eg in egresses:
+        resolve[eg.router].append((eg.network, ("egress", eg.name)))
+    for r in routers:
+        resolve[r].sort(key=lambda x: x[0].prefixlen, reverse=True)
+
+    # ---- 保通要求(由 build_model 补上,网络模型先留空)
+    return Model(routers=routers, links=links, egresses=egresses,
+                 tables=tables, requirements=[], resolve=resolve)
+
+
+def build_model(topology: dict, routes: dict, requirements: dict) -> Model:
+    """把上传的三个 JSON 对象校验并组装成模型(含保通要求)。"""
+    model = build_network(topology, routes)
+    rset = set(model.routers)
+    seen_egress = {eg.name for eg in model.egresses}
+
     # ---- 保通要求
+    if not isinstance(requirements, dict):
+        raise InputError("保通要求必须是 JSON 对象")
     reqs = []
     items = requirements.get("requirements")
     if not isinstance(items, list) or not items:
@@ -197,18 +222,8 @@ def build_model(topology: dict, routes: dict, requirements: dict) -> Model:
             raise InputError(f"要求 {name} 引用了不存在的出口: {sorted(unknown)}")
         reqs.append(Requirement(name, ingress, target, allowed))
 
-    # ---- 每台路由器的下一跳解析表(链路对端 + 本机出口),最长前缀优先
-    resolve: dict[str, list[tuple[ipaddress.IPv4Network, tuple[str, str]]]] = {r: [] for r in routers}
-    for lk in links:
-        resolve[lk.a].append((lk.network, ("router", lk.b)))
-        resolve[lk.b].append((lk.network, ("router", lk.a)))
-    for eg in egresses:
-        resolve[eg.router].append((eg.network, ("egress", eg.name)))
-    for r in routers:
-        resolve[r].sort(key=lambda x: x[0].prefixlen, reverse=True)
-
-    return Model(routers=routers, links=links, egresses=egresses,
-                 tables=tables, requirements=reqs, resolve=resolve)
+    model.requirements = reqs
+    return model
 
 
 # ------------------------------------------------------- 目标网段等价类划分
